@@ -1,0 +1,310 @@
+---
+title: "LGT Simulation Study"
+author: Laura Kubatko, Simone Linz, Kristina Wicke
+output: html_document
+date: "2026-06-13"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This document reproduces the simulation study in the manuscript "Revisiting a simple model of lateral gene transfer in phylogenetics" by Laura Kubatko, Simone Linz, and Kristina Wicke.
+
+We set the initial seed here, so that the results presented in the manuscript can be reproduced exactly. If you would like to repeat the simulation study with a different set of randomly generated data, you need only change the seed in the chunk below.
+
+```{r}
+set.seed(65023)
+```
+
+
+### Part 1: Distribution of MLEs ###
+
+We first consider estimating the MLEs of the parameters $(t_1, t_2, \lambda)$. We simulate repeatedly from the model with fixed parameter values, obtain MLEs, and plot the distribution of the MLEs using the code below. 
+
+
+```{r}
+# compute site pattern probabilities for a specific choice of parameters
+# species tree is ((A:t1,B:t1):t2-t1,C:t2)
+# m is mu in the JC69 model
+# lambda is the HGT rate parameter
+
+GetSitePatternProbs = function(t1,t2,m,lambda) {
+
+pxxx = (3*exp(-((t1+2*t2)*(m+lambda)))*m*(m-2*lambda) + 4*m*lambda +     3*exp(-3*t1*(m+lambda))*m*lambda + 8*lambda^2 - 
+6*exp(-t1*lambda-2*t2*(m+lambda))*m*(m+lambda) + 
+9*exp(-2*t2*(m+lambda))*m*(m+2*lambda) + m^3/(2*m+3*lambda) + 
+(3*exp(-2*m*t1-3*t1*lambda)*m*(m+lambda)*(m+3*lambda))/(2*m+3*lambda))/(8*(m+lambda)^2)
+ 
+pxxy = 1/(16*((m+lambda)^2)*(2*m+3*lambda))*3*(2*m*(m+2*lambda)^2 + 
+ exp(-(3*t1+2*t2)*(m+lambda))*(2*exp(3*t1*(m+lambda))*m*(m-2*lambda)*(2*m+3*lambda) - 
+ 2*exp(2*t1*(m+lambda))*m*(2*m-lambda)*(2*m+3*lambda) + 
+ 2*exp(3*m*t1+2*t1*lambda)*m*(m+lambda)*(2*m+3*lambda) + 
+ exp(3*m*t1+2*m*t2+2*t2*lambda)*((m+lambda)^2)*(2*m+3*lambda) - 
+ 2*exp(2*t2*(m+lambda))*lambda*(2*m+lambda)*(2*m+3*lambda) + 
+ exp(m*t1+2*m*t2+2*t2*lambda)*(-4*m^3-7*(m^2)*lambda+3*lambda^3)))
+
+pxyy = 1/(32*((m+lambda)^2)*(2*m+3*lambda))*3*(4*m*(m+2*lambda)^2 - 
+ exp(-(3*t1+2*t2)*(m+lambda))*(2*exp(2*t1*(m+lambda))*m*(m-5*lambda)*(2*m+3*lambda) - 
+ 4*exp(3*t1*(m+lambda))*m*(m-2*lambda)*(2*m+3*lambda) + 
+ 2*exp(2*t2*(m+lambda))*(m-lambda)*lambda*(2*m+3*lambda) + 
+ 6*exp(3*m*t1+2*t1*lambda)*m*(m+lambda)*(2*m+3*lambda) + 
+ exp(3*m*t1+2*m*t2+2*t2*lambda)*((m+lambda)^2)*(2*m+3*lambda) - 
+ 3*exp(m*t1+2*m*t2+2*t2*lambda)*(m+lambda)*(2*m^2+3*m*lambda-lambda^2)))
+
+pxyz = 3*m*(-3*exp(-2*t2*(m+lambda))*m + 
+ exp(-(t1+2*t2)*(m+lambda))*(m-2*lambda) + 
+ exp(-3*t1*(m+lambda))*lambda + 
+ 2*exp(-t1*lambda-2*t2*(m+lambda))*(m+lambda) + 
+ m*(m+2*lambda)/(2*m+3*lambda) - 
+ (exp(t1*(m-3*(m+lambda)))*(m+lambda)*(m+3*lambda)/(2*m+3*lambda)))/(4*(m+lambda)^2)
+
+return(c(pxxx,pxxy,pxyy,pxyz))
+
+}
+
+```
+
+
+As noted in the manuscript, we use transformations similar to those developed by Dave Swofford in the supplement to Peng et al. (2022). Specifically, the parameter vector is
+$$ z_1 = sin^{-1}\biggl(\sqrt{\frac{t_1}{t_2}}\biggr)$$
+$$ z_2 = \log (t_2)$$
+$$ z_3 = \log(\lambda)$$
+
+
+The parameters are back-transformed prior to likelihood calculation (in the function that computes the likelihood) according to
+
+$$t_1 = t_2 sin^2(z_1)$$
+$$t_2 = e^{\log(z_2)}$$
+$$\lambda = e^{\log(z_3)}$$
+
+```{r, fig.width=10.0}
+
+GetLikFull = function(x,data) {
+  
+  t2 = exp(x[2])
+  t1 = t2*(sin(x[1]))^2
+  lambda = exp(x[3])
+  probs = GetSitePatternProbs(t1,t2,4/3,lambda)
+  
+  # note that prob3 is used twice; probs is of dimension 4
+  lik = data[1]*log(probs[1])+data[2]*log(probs[2])+data[3]*log(probs[3])+
+        data[4]*log(probs[3])+data[5]*log(probs[4])
+   
+  return(-1.0*lik)
+
+}
+```
+
+The code below creates functions to run the simulation study for various choices of $t_1, t_2, \lambda$ and sample size (number of sites in the aligned data).
+
+
+```{r, fig.width=10, fig.height=4}
+
+RunSim = function(myt1,myt2,mylambda,mysamsize) {
+
+  myests = matrix(0,ncol=3,nrow=100)
+  xx = c(asin(sqrt(myt1/myt2)),log(myt2),log(mylambda))
+  
+  for (i in 1:100) {
+
+    # Get true site pattern probabilities
+    myprobs = GetSitePatternProbs(myt1,myt2,4/3,mylambda)
+    myprobs_full = c(myprobs[1],myprobs[2],myprobs[3],myprobs[3],myprobs[4])
+
+    # Get a sample of site patterns
+    mydat = rmultinom(1,mysamsize,myprobs_full)
+    est = optim(par=xx,fn=GetLikFull,data=mydat)
+    myests[i,2] = exp(est$par[2])
+    myests[i,1] = exp(est$par[2])*(sin(est$par[1]))^2
+    myests[i,3] = exp(est$par[3])
+
+  }
+  
+  return(myests)
+
+}
+
+
+PlotResults = function(myests,myt1,myt2,mylambda) {
+  par(mfrow=c(1,3))
+  hist(myests[,1],xlab=expression(t[1]),main="",col="maroon",cex.axis=2.2,cex.lab=2.2)
+  lines(c(myt1,myt1),c(0,100),col="black",lwd=6)
+  lines(c(mean(myests[,1]),mean(myests[,1])),c(0,100),col="darkgray",lwd=4)
+  hist(myests[,2],xlab=expression(t[2]),main="",col="maroon",cex.axis=2.2,cex.lab=2.2)
+  lines(c(myt2,myt2),c(0,100),col="black",lwd=6)
+  lines(c(mean(myests[,2]),mean(myests[,2])),c(0,100),col="darkgray",lwd=4)
+  hist(myests[,3],xlab=expression(lambda),main="",col="maroon",cex.axis=2.2,cex.lab=2.2)
+  lines(c(mylambda,mylambda),c(0,100),col="black",lwd=6)
+  lines(c(mean(myests[,3]),mean(myests[,3])),c(0,100),col="darkgray",lwd=4)
+
+}  
+  
+```
+
+
+ Now we run the simulation study and plot the results.  The following settings are considered: <br><br>
+ 
+ <b>Setting 1:</b> $t_1 = 0.1, t_2 = 0.2, \lambda=0.8$<br>
+ <b>Setting 2:</b> $t_1 = 0.2, t_2 = 0.4, \lambda=0.8$<br>
+ <b>Setting 3:</b> $t_1 = 0.4, t_2 = 0.8, \lambda=0.8$<br>
+ <b>Setting 4:</b> $t_1 = 0.1, t_2 = 0.2, \lambda=1.2$<br>
+ <b>Setting 5:</b> $t_1 = 0.2, t_2 = 0.4, \lambda=1.2$<br>
+ <b>Setting 6:</b> $t_1 = 0.4, t_2 = 0.8, \lambda=1.2$<br>
+ 
+```{r, fig.width=10, fig.height=4}
+
+ests1 = RunSim(0.1,0.2,0.8,1000000)
+PlotResults(ests1,0.1,0.2,0.8)
+
+ests2 = RunSim(0.2,0.4,0.8,1000000)
+PlotResults(ests2,0.2,0.4,0.8)
+
+ests3 = RunSim(0.4,0.8,0.8,1000000)
+PlotResults(ests3,0.4,0.8,0.8)
+
+ests4 = RunSim(0.1,0.2,1.2,1000000)
+PlotResults(ests4,0.1,0.2,1.2)
+
+ests5 = RunSim(0.2,0.4,1.2,1000000)
+PlotResults(ests5,0.2,0.4,1.2)
+
+ests6 = RunSim(0.4,0.8,1.2,1000000)
+PlotResults(ests6,0.4,0.8,1.2)
+
+```
+
+### Part 2: Mean squared error as a function of sample size ###
+
+The code below provides functions for the simulation so that we can look at how estimation error, as measured by the Root Mean Squared Error (RMSE), changes as a function of parameter values and sample size.
+
+```{r, fig.width=10.0, fig.height=10.0}
+# Function to run the simulation study (1000 reps)
+# and return the rmse for the three parameters
+
+RunSimMSE = function(myt1,myt2,mylambda,nsites) {
+  
+  mysimests = matrix(0,ncol=3,nrow=1000)
+  xxx = c(asin(sqrt(myt1/myt2)),log(myt2),log(mylambda))
+  
+  for (i in 1:1000) {
+
+    # Get true site pattern probabilities
+    myprobs = GetSitePatternProbs(myt1,myt2,4/3,mylambda)
+    myprobs_full = c(myprobs[1],myprobs[2],myprobs[3],myprobs[3],myprobs[4])
+
+    # Get a sample of site patterns
+    mydata = rmultinom(1,nsites,myprobs_full)
+    #print(mydata)
+    est = optim(par=xxx,fn=GetLikFull,data=mydata)
+    #print(est)
+    mysimests[i,2] = exp(est$par[2])
+    mysimests[i,1] = exp(est$par[2])*(sin(est$par[1]))^2
+    mysimests[i,3] = exp(est$par[3])
+
+  }
+  
+  return(c(sqrt(mean((mysimests[,1]-myt1)^2)),sqrt(mean((mysimests[,2]-myt2)^2)),sqrt(mean((mysimests[,3]-mylambda)^2))))
+  
+}
+
+
+# Now run a simulation study where we look at RMSE for various 
+# choices of sample size
+
+rmse5 = matrix(c(c(RunSimMSE(0.2,0.4,1.2,1000)),
+c(RunSimMSE(0.2,0.4,1.2,5000)),  
+c(RunSimMSE(0.2,0.4,1.2,10000)),  
+c(RunSimMSE(0.2,0.4,1.2,50000)),
+c(RunSimMSE(0.2,0.4,1.2,100000)),
+c(RunSimMSE(0.2,0.4,1.2,500000)), 
+c(RunSimMSE(0.2,0.4,1.2,1000000)),
+c(RunSimMSE(0.2,0.4,1.2,5000000)),
+c(RunSimMSE(0.2,0.4,1.2,10000000))),ncol=3,byrow=T)
+
+rmse2 = matrix(c(c(RunSimMSE(0.2,0.4,0.8,1000)),
+c(RunSimMSE(0.2,0.4,0.8,5000)),  
+c(RunSimMSE(0.2,0.4,0.8,10000)),  
+c(RunSimMSE(0.2,0.4,0.8,50000)),
+c(RunSimMSE(0.2,0.4,0.8,100000)),
+c(RunSimMSE(0.2,0.4,0.8,500000)), 
+c(RunSimMSE(0.2,0.4,0.8,1000000)),
+c(RunSimMSE(0.2,0.4,0.8,5000000)),
+c(RunSimMSE(0.2,0.4,0.8,10000000))),ncol=3,byrow=T)
+
+rmse4 = matrix(c(c(RunSimMSE(0.1,0.2,1.2,1000)),
+c(RunSimMSE(0.1,0.2,1.2,5000)),  
+c(RunSimMSE(0.1,0.2,1.2,10000)),  
+c(RunSimMSE(0.1,0.2,1.2,50000)),
+c(RunSimMSE(0.1,0.2,1.2,100000)),
+c(RunSimMSE(0.1,0.2,1.2,500000)), 
+c(RunSimMSE(0.1,0.2,1.2,1000000)),
+c(RunSimMSE(0.1,0.2,1.2,5000000)),
+c(RunSimMSE(0.1,0.2,1.2,10000000))),ncol=3,byrow=T)
+
+rmse1 = matrix(c(c(RunSimMSE(0.1,0.2,0.8,1000)),
+c(RunSimMSE(0.1,0.2,0.8,5000)),  
+c(RunSimMSE(0.1,0.2,0.8,10000)),  
+c(RunSimMSE(0.1,0.2,0.8,50000)),
+c(RunSimMSE(0.1,0.2,0.8,100000)),
+c(RunSimMSE(0.1,0.2,0.8,500000)), 
+c(RunSimMSE(0.1,0.2,0.8,1000000)),
+c(RunSimMSE(0.1,0.2,0.8,5000000)),
+c(RunSimMSE(0.1,0.2,0.8,10000000))),ncol=3,byrow=T)
+
+rmse6 = matrix(c(c(RunSimMSE(0.4,0.8,1.2,1000)),
+c(RunSimMSE(0.4,0.8,1.2,5000)),  
+c(RunSimMSE(0.4,0.8,1.2,10000)),  
+c(RunSimMSE(0.4,0.8,1.2,50000)),
+c(RunSimMSE(0.4,0.8,1.2,100000)),
+c(RunSimMSE(0.4,0.8,1.2,500000)), 
+c(RunSimMSE(0.4,0.8,1.2,1000000)),
+c(RunSimMSE(0.4,0.8,1.2,5000000)),
+c(RunSimMSE(0.4,0.8,1.2,10000000))),ncol=3,byrow=T)
+
+rmse3 = matrix(c(c(RunSimMSE(0.4,0.8,0.8,1000)),
+c(RunSimMSE(0.4,0.8,0.8,5000)),  
+c(RunSimMSE(0.4,0.8,0.8,10000)),  
+c(RunSimMSE(0.4,0.8,0.8,50000)),
+c(RunSimMSE(0.4,0.8,0.8,100000)),
+c(RunSimMSE(0.4,0.8,0.8,500000)), 
+c(RunSimMSE(0.4,0.8,0.8,1000000)),
+c(RunSimMSE(0.4,0.8,0.8,5000000)),
+c(RunSimMSE(0.4,0.8,0.8,10000000))),ncol=3,byrow=T)
+
+xvals = c(1000,5000,10000,50000,100000,500000,1000000,5000000,10000000)
+
+par(mfrow=c(3,2))
+
+plot(log(xvals),rmse1[,1],type='l',xlab="log(number of sites)",ylab="RMSE",ylim=c(0,max(rmse1)),col="lightskyblue",lwd=4,main="t1=0.1, t2=0.2, lambda=0.8",cex.axis=2.0,cex.lab=2.0)
+lines(log(xvals),rmse1[,2],col="maroon",lwd=4)
+lines(log(xvals),rmse1[,3],col="darkgreen",lwd=4)
+legend(14,max(rmse1)-0.05,legend=c(expression(t[1]),expression(t[2]),expression(lambda)),col=c("lightskyblue","maroon","darkgreen"),lwd=c(4,4,4),cex=1.6)
+
+plot(log(xvals),rmse2[,1],type='l',xlab="log(number of sites)",ylab="RMSE",ylim=c(0,max(rmse2)),col="lightskyblue",lwd=4,main="t1=0.1, t2=0.2, lambda=1.2",cex.axis=2.0,cex.lab=2.0)
+lines(log(xvals),rmse2[,2],col="maroon",lwd=4)
+lines(log(xvals),rmse2[,3],col="darkgreen",lwd=4)
+legend(14,max(rmse2)-0.05,legend=c(expression(t[1]),expression(t[2]),expression(lambda)),col=c("lightskyblue","maroon","darkgreen"),lwd=c(4,4,4),cex=1.6)
+
+plot(log(xvals),rmse3[,1],type='l',xlab="log(number of sites)",ylab="RMSE",ylim=c(0,max(rmse3)),col="lightskyblue",lwd=4,main="t1=0.2, t2=0.4, lambda=0.8",cex.axis=2.0,cex.lab=2.0)
+lines(log(xvals),rmse3[,2],col="maroon",lwd=4)
+lines(log(xvals),rmse3[,3],col="darkgreen",lwd=4)
+legend(14,max(rmse3)-0.05,legend=c(expression(t[1]),expression(t[2]),expression(lambda)),col=c("lightskyblue","maroon","darkgreen"),lwd=c(4,4,4),cex=1.6)
+
+plot(log(xvals),rmse4[,1],type='l',xlab="log(number of sites)",ylab="RMSE",ylim=c(0,max(rmse4)),col="lightskyblue",lwd=4,main="t1=0.2, t2=0.4, lambda=1.2",cex.axis=2.0,cex.lab=2.0)
+lines(log(xvals),rmse4[,2],col="maroon",lwd=4)
+lines(log(xvals),rmse4[,3],col="darkgreen",lwd=4)
+legend(14,max(rmse4)-0.05,legend=c(expression(t[1]),expression(t[2]),expression(lambda)),col=c("lightskyblue","maroon","darkgreen"),lwd=c(4,4,4),cex=1.6)
+
+plot(log(xvals),rmse5[,1],type='l',xlab="log(number of sites)",ylab="RMSE",ylim=c(0,max(rmse5)),col="lightskyblue",lwd=4,main="t1=0.4, t2=0.8, lambda=0.8",cex.axis=2.0,cex.lab=2.0)
+lines(log(xvals),rmse5[,2],col="maroon",lwd=4)
+lines(log(xvals),rmse5[,3],col="darkgreen",lwd=4)
+legend(14,max(rmse5)-0.05,legend=c(expression(t[1]),expression(t[2]),expression(lambda)),col=c("lightskyblue","maroon","darkgreen"),lwd=c(4,4,4),cex=1.6)
+
+plot(log(xvals),rmse6[,1],type='l',xlab="log(number of sites)",ylab="RMSE",ylim=c(0,max(rmse6)),col="lightskyblue",lwd=4,main="t1=0.4, t2=0.8, lambda=1.2",cex.axis=2.0,cex.lab=2.0)
+lines(log(xvals),rmse6[,2],col="maroon",lwd=4)
+lines(log(xvals),rmse6[,3],col="darkgreen",lwd=4)
+legend(14,max(rmse6)-0.05,legend=c(expression(t[1]),expression(t[2]),expression(lambda)),col=c("lightskyblue","maroon","darkgreen"),lwd=c(4,4,4),cex=1.6)
+```
+
+
